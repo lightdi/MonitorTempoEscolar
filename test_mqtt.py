@@ -17,7 +17,9 @@ def main():
     if len(sys.argv) < 2:
         print("Uso: python test_mqtt.py <mensagem>")
         print("Exemplo: python test_mqtt.py 'Aula de Matemática começou!'")
-        sys.exit(1)
+        print("\nOu execute no terminal:")
+        print("  python test_mqtt.py \"Sua mensagem aqui\"")
+        return 1
     
     message = " ".join(sys.argv[1:])
     
@@ -26,18 +28,20 @@ def main():
     try:
         print(f"Conectando ao broker {MQTT_BROKER}:{MQTT_PORT}...")
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        client.subscribe(MQTT_TOPIC)
         
         print(f"Enviando mensagem para o tópico '{MQTT_TOPIC}'...")
         client.publish(MQTT_TOPIC, message)
         
         print(f"✓ Mensagem enviada: '{message}'")
         client.disconnect()
+        return 0
         
     except Exception as e:
         print(f"Erro: {e}")
-        sys.exit(1)
+        return 1
 
 if __name__ == "__main__":
-    main()
+    exit_code = main()
+    if exit_code:
+        sys.exit(exit_code)
 

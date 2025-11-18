@@ -23,6 +23,13 @@ except ImportError:
     MQTT_AVAILABLE = False
     print("Aviso: paho-mqtt não instalado. Funcionalidade MQTT desabilitada.")
 
+try:
+    from pynput import keyboard
+    KEYBOARD_LISTENER_AVAILABLE = True
+except ImportError:
+    KEYBOARD_LISTENER_AVAILABLE = False
+    print("Aviso: pynput não instalado. Instale com: pip install pynput")
+
 # Configurações
 DB_NAME = "config.db"
 MP3_FOLDER = "mp3"
@@ -58,6 +65,7 @@ class ScreensaverIFPB:
         self.logo_visible = True  # Controla se o logo está visível
         self.animation_paused = False  # Controla se a animação está pausada
         self.mpg123_process = None  # Processo do mpg123 em execução
+        self.keyboard_listener = None  # Listener de teclado do pynput
         
         # Criar estrutura de pastas
         self.setup_folders()
@@ -88,17 +96,22 @@ class ScreensaverIFPB:
             keycode = event.keycode
             char = event.char if hasattr(event, 'char') else ''
             
-            # Debug: imprimir tecla pressionada (descomente para debug)
-            print(f"Tecla pressionada: keysym='{key}' keycode={keycode} char='{char}'")
+            # Ignorar teclas de modificação sozinhas (não interferir com atalhos do sistema)
+            if key in ['Control_L', 'Control_R', 'Shift_L', 'Shift_R', 'Alt_L', 'Alt_R', 'Meta_L', 'Meta_R']:
+                return
             
-            # Verificar F2 (pode vir como F2, F2_L, ou keycode 68, ou 113 em alguns sistemas)
+            # Debug: imprimir apenas teclas de interesse (comentar para reduzir output)
+            # print(f"Tkinter: Tecla pressionada: keysym='{key}' keycode={keycode} char='{char}'")
+            
+            # Verificar F2 (apenas F2 sozinho, não com modificadores)
             if key == 'F2' or keycode == 68 or keycode == 113:
-                print("F2 detectado - abrindo configuração")
+                print("F2 detectado via Tkinter - abrindo configuração")
                 self.show_config_window(event)
-            # Verificar ESC (pode vir como Escape, Escape_L, ou keycode 9, ou 27)
+            # Verificar ESC (apenas ESC sozinho)
             elif key == 'Escape' or keycode == 9 or keycode == 27:
-                print("ESC detectado - fechando programa")
+                print("ESC detectado via Tkinter - fechando programa")
                 self.on_escape(event)
+            # Ignorar todas as outras teclas (não interferir com atalhos do sistema)
         
         # Bind de teclas - múltiplas abordagens para máxima compatibilidade
         # 1. Handler genérico que captura qualquer tecla
@@ -130,11 +143,30 @@ class ScreensaverIFPB:
         # 5. Garantir que a janela receba foco periodicamente (para Armbian)
         self.root.after(500, self.keep_focus)
         
+        # 6. Iniciar listener de teclado em nível de sistema (pynput) - mais robusto para Armbian
+        if KEYBOARD_LISTENER_AVAILABLE:
+            self.start_keyboard_listener()
+        else:
+            print("AVISO: pynput não disponível. Instale com: pip install pynput")
+            print("Usando método alternativo: duplo clique na tela para abrir configuração")
+            self.try_alternative_keyboard_capture()
+        
+        # 7. Adicionar duplo clique como alternativa sempre (mesmo com pynput)
+        self.canvas.bind('<Double-Button-1>', lambda e: self.show_config_window())
+        
         # Forçar tela cheia novamente após tudo estar carregado (garantia para Armbian)
         self.root.after(100, self.ensure_fullscreen)
         
+        # Mostrar instruções na tela por alguns segundos
+        self.root.after(500, self.show_instructions)
+        
         # Iniciar animação
         self.animate_logo()
+    
+    def show_instructions(self):
+        """Mostra instruções de uso na tela por alguns segundos"""
+        instructions = "F2 ou Duplo Clique: Configuração\nESC: Sair"
+        self.display_message(instructions, duration=5000, color='cyan', font_size=32)
     
     def ensure_fullscreen(self):
         """Garante que a janela está em tela cheia (útil para Armbian)"""
@@ -173,6 +205,86 @@ class ScreensaverIFPB:
                 self.root.after(1000, self.keep_focus)
         except Exception as e:
             print(f"Erro em keep_focus: {e}")
+    
+    def start_keyboard_listener(self):
+        """Inicia listener de teclado em nível de sistema usando pynput"""
+        def on_press(key):
+            """Callback quando uma tecla é pressionada"""
+            try:
+                # Ignorar teclas de modificação (Ctrl, Shift, Alt) sozinhas
+                if key in [keyboard.Key.ctrl_l, keyboard.Key.ctrl_r, 
+                          keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r,
+                          keyboard.Key.alt, keyboard.Key.alt_l, keyboard.Key.alt_r,
+                          keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r]:
+                    return
+                
+                # Debug: imprimir apenas teclas de interesse (comentar para reduzir output)
+                # print(f"pynput: Tecla pressionada: {key}")
+                
+                # Verificar F2 (apenas F2 sozinho, não com modificadores)
+                if hasattr(key, 'name') and key.name == 'f2':
+                    print("F2 detectado via pynput - abrindo configuração")
+                    self.root.after(0, self.show_config_window)
+                elif key == keyboard.Key.f2:
+                    print("F2 detectado via pynput (Key.f2) - abrindo configuração")
+                    self.root.after(0, self.show_config_window)
+                # Verificar ESC (apenas ESC sozinho)
+                elif hasattr(key, 'name') and key.name == 'esc':
+                    print("ESC detectado via pynput - fechando programa")
+                    self.root.after(0, self.on_escape)
+                elif key == keyboard.Key.esc:
+                    print("ESC detectado via pynput (Key.esc) - fechando programa")
+                    self.root.after(0, self.on_escape)
+                # Ignorar todas as outras teclas (não interferir com atalhos do sistema)
+            except AttributeError:
+                # Teclas especiais podem não ter .name - ignorar silenciosamente
+                pass
+            except Exception as e:
+                # Log apenas erros críticos
+                print(f"Erro crítico no listener de teclado: {e}")
+        
+        def on_release(key):
+            """Callback quando uma tecla é solta (não usado, mas necessário)"""
+            pass
+        
+        try:
+            # Criar listener em thread separada
+            self.keyboard_listener = keyboard.Listener(
+                on_press=on_press,
+                on_release=on_release,
+                suppress=False  # Não suprimir eventos, apenas monitorar
+            )
+            self.keyboard_listener.start()
+            print("✓ Listener de teclado pynput iniciado com sucesso")
+            print("  Pressione F2 para abrir configuração ou ESC para sair")
+        except Exception as e:
+            print(f"✗ Erro ao iniciar listener de teclado: {e}")
+            print("  Tentando método alternativo...")
+            # Tentar método alternativo
+            self.try_alternative_keyboard_capture()
+    
+    def try_alternative_keyboard_capture(self):
+        """Método alternativo usando eventos de mouse como fallback"""
+        print("Método alternativo: Use duplo clique na tela para abrir configuração")
+        
+        def on_double_click(event):
+            """Abre configuração com duplo clique"""
+            self.show_config_window()
+        
+        # Adicionar duplo clique no canvas como alternativa
+        self.canvas.bind('<Double-Button-1>', on_double_click)
+        
+        # Também tentar capturar eventos de teclado de forma mais agressiva
+        def force_key_capture():
+            """Tenta forçar captura de teclado periodicamente"""
+            try:
+                self.root.focus_force()
+                self.canvas.focus_force()
+            except:
+                pass
+            self.root.after(500, force_key_capture)
+        
+        force_key_capture()
     
     def setup_folders(self):
         """Cria as pastas necessárias se não existirem"""
@@ -220,11 +332,11 @@ class ScreensaverIFPB:
         # Configurar fundo preto primeiro
         self.root.configure(bg='black')
         
-        # Remover bordas e barra de título
-        self.root.overrideredirect(True)
-        
-        # Configurar geometria para tela cheia (método alternativo para Armbian)
+        # Configurar geometria para tela cheia PRIMEIRO (antes de overrideredirect)
         self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+        
+        # Remover bordas e barra de título (depois de configurar geometria)
+        self.root.overrideredirect(True)
         
         # Forçar tela cheia usando múltiplos métodos (compatibilidade Armbian)
         try:
@@ -258,7 +370,7 @@ class ScreensaverIFPB:
             self.root,
             bg='black',
             highlightthickness=0,
-            cursor='none'
+            cursor='arrow'  # Mostrar cursor do mouse
         )
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
@@ -278,13 +390,17 @@ class ScreensaverIFPB:
         self.root.update_idletasks()
         self.root.update()
         
-        # Forçar foco na janela e canvas (importante para Armbian)
-        self.root.focus_set()
-        self.canvas.focus_set()
-        self.root.focus_force()
-        
-        # Configurar janela para receber eventos de teclado
+        # Configurar janela para receber eventos de teclado e mouse
         self.root.configure(takefocus=True)
+        
+        # Forçar foco na janela e canvas (importante para Armbian)
+        # Fazer após um pequeno delay para garantir que a janela está totalmente renderizada
+        self.root.after(100, lambda: self.root.focus_force())
+        self.root.after(100, lambda: self.canvas.focus_set())
+        
+        # Garantir que eventos de mouse funcionem
+        self.canvas.bind('<Button-1>', lambda e: self.canvas.focus_set())
+        self.canvas.bind('<Motion>', lambda e: self.canvas.focus_set())
     
     def draw_logo(self):
         """Desenha o logo na tela"""
@@ -697,6 +813,13 @@ class ScreensaverIFPB:
     def on_escape(self, event=None):
         """Fecha o programa ao pressionar Escape"""
         if messagebox.askyesno("Sair", "Deseja realmente sair?"):
+            # Parar listener de teclado
+            if self.keyboard_listener:
+                try:
+                    self.keyboard_listener.stop()
+                except:
+                    pass
+            
             if self.mqtt_client:
                 self.mqtt_client.loop_stop()
                 self.mqtt_client.disconnect()
