@@ -81,9 +81,27 @@ class ScreensaverIFPB:
         if MQTT_AVAILABLE:
             self.init_mqtt()
         
-        # Bind de teclas
+        # Bind de teclas - usar bind_all para capturar eventos globais (importante para Armbian)
+        # Bind na janela principal
         self.root.bind('<F2>', self.show_config_window)
         self.root.bind('<Escape>', self.on_escape)
+        self.root.bind('<KeyPress-F2>', self.show_config_window)
+        self.root.bind('<KeyPress-Escape>', self.on_escape)
+        
+        # Bind no canvas também
+        self.canvas.bind('<F2>', self.show_config_window)
+        self.canvas.bind('<Escape>', self.on_escape)
+        self.canvas.bind('<KeyPress-F2>', self.show_config_window)
+        self.canvas.bind('<KeyPress-Escape>', self.on_escape)
+        
+        # Bind global (captura eventos mesmo sem foco - útil para Armbian)
+        self.root.bind_all('<F2>', self.show_config_window)
+        self.root.bind_all('<Escape>', self.on_escape)
+        self.root.bind_all('<KeyPress-F2>', self.show_config_window)
+        self.root.bind_all('<KeyPress-Escape>', self.on_escape)
+        
+        # Garantir que a janela receba foco periodicamente (para Armbian)
+        self.root.after(500, self.keep_focus)
         
         # Forçar tela cheia novamente após tudo estar carregado (garantia para Armbian)
         self.root.after(100, self.ensure_fullscreen)
@@ -108,6 +126,19 @@ class ScreensaverIFPB:
                 self.root.update_idletasks()
         except Exception as e:
             print(f"Aviso ao verificar tela cheia: {e}")
+    
+    def keep_focus(self):
+        """Mantém o foco na janela (útil para Armbian onde o foco pode ser perdido)"""
+        try:
+            # Verificar se a janela ainda existe
+            if self.root and self.root.winfo_exists():
+                # Forçar foco periodicamente
+                self.root.focus_set()
+                self.canvas.focus_set()
+                # Agendar próxima verificação (a cada 2 segundos)
+                self.root.after(2000, self.keep_focus)
+        except:
+            pass
     
     def setup_folders(self):
         """Cria as pastas necessárias se não existirem"""
@@ -200,6 +231,9 @@ class ScreensaverIFPB:
         # Forçar canvas a ocupar toda a tela
         self.canvas.config(width=screen_width, height=screen_height)
         
+        # Configurar canvas para receber eventos de teclado
+        self.canvas.focus_set()
+        
         # Posição inicial do logo (centro)
         self.logo_x = (screen_width - self.logo_width) // 2
         self.logo_y = (screen_height - self.logo_height) // 2
@@ -207,6 +241,11 @@ class ScreensaverIFPB:
         # Forçar atualização final
         self.root.update_idletasks()
         self.root.update()
+        
+        # Forçar foco na janela e canvas (importante para Armbian)
+        self.root.focus_set()
+        self.canvas.focus_set()
+        self.root.focus_force()
     
     def draw_logo(self):
         """Desenha o logo na tela"""
