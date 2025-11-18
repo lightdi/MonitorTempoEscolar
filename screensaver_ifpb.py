@@ -85,8 +85,29 @@ class ScreensaverIFPB:
         self.root.bind('<F2>', self.show_config_window)
         self.root.bind('<Escape>', self.on_escape)
         
+        # Forçar tela cheia novamente após tudo estar carregado (garantia para Armbian)
+        self.root.after(100, self.ensure_fullscreen)
+        
         # Iniciar animação
         self.animate_logo()
+    
+    def ensure_fullscreen(self):
+        """Garante que a janela está em tela cheia (útil para Armbian)"""
+        try:
+            screen_width = self.root.winfo_screenwidth()
+            screen_height = self.root.winfo_screenheight()
+            
+            # Verificar se a janela está realmente em tela cheia
+            current_width = self.root.winfo_width()
+            current_height = self.root.winfo_height()
+            
+            # Se não estiver em tela cheia, forçar novamente
+            if current_width < screen_width or current_height < screen_height:
+                self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+                self.root.attributes('-fullscreen', True)
+                self.root.update_idletasks()
+        except Exception as e:
+            print(f"Aviso ao verificar tela cheia: {e}")
     
     def setup_folders(self):
         """Cria as pastas necessárias se não existirem"""
@@ -127,11 +148,45 @@ class ScreensaverIFPB:
         self.root = tk.Tk()
         self.root.title("Proteção de Tela IFPB")
         
-        # Configurar tela cheia sem bordas
-        self.root.attributes('-fullscreen', True)
-        self.root.attributes('-topmost', True)
+        # Obter dimensões da tela antes de configurar
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Configurar fundo preto primeiro
         self.root.configure(bg='black')
+        
+        # Remover bordas e barra de título
         self.root.overrideredirect(True)
+        
+        # Configurar geometria para tela cheia (método alternativo para Armbian)
+        self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+        
+        # Forçar tela cheia usando múltiplos métodos (compatibilidade Armbian)
+        try:
+            self.root.attributes('-fullscreen', True)
+        except:
+            pass
+        
+        try:
+            # Método alternativo para Linux/Armbian
+            self.root.wm_attributes('-fullscreen', True)
+        except:
+            pass
+        
+        # Sempre no topo
+        try:
+            self.root.attributes('-topmost', True)
+        except:
+            pass
+        
+        try:
+            self.root.wm_attributes('-topmost', True)
+        except:
+            pass
+        
+        # Forçar atualização da janela
+        self.root.update_idletasks()
+        self.root.update()
         
         # Canvas para desenhar
         self.canvas = tk.Canvas(
@@ -142,11 +197,16 @@ class ScreensaverIFPB:
         )
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
+        # Forçar canvas a ocupar toda a tela
+        self.canvas.config(width=screen_width, height=screen_height)
+        
         # Posição inicial do logo (centro)
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
         self.logo_x = (screen_width - self.logo_width) // 2
         self.logo_y = (screen_height - self.logo_height) // 2
+        
+        # Forçar atualização final
+        self.root.update_idletasks()
+        self.root.update()
     
     def draw_logo(self):
         """Desenha o logo na tela"""
