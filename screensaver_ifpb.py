@@ -140,24 +140,20 @@ class ScreensaverIFPB:
         self.root.bind_all('<KeyPress-F2>', self.show_config_window)
         self.root.bind_all('<KeyPress-Escape>', self.on_escape)
         
-        # 5. Garantir que a janela receba foco periodicamente (para Armbian)
-        self.root.after(500, self.keep_focus)
-        
-        # 6. Iniciar listener de teclado em nível de sistema (pynput) - mais robusto para Armbian
+        # 5. Iniciar listener de teclado (pynput) - opcional, não crítico
         if KEYBOARD_LISTENER_AVAILABLE:
             self.start_keyboard_listener()
-        else:
-            print("AVISO: pynput não disponível. Instale com: pip install pynput")
-            print("Usando método alternativo: duplo clique na tela para abrir configuração")
-            self.try_alternative_keyboard_capture()
         
-        # 7. Adicionar duplo clique como alternativa sempre (mesmo com pynput)
+        # 6. Adicionar duplo clique como alternativa (sempre funciona)
         self.canvas.bind('<Double-Button-1>', lambda e: self.show_config_window())
         
-        # Forçar tela cheia novamente após tudo estar carregado (garantia para Armbian)
-        self.root.after(100, self.ensure_fullscreen)
+        # 7. Garantir que está maximizada após carregar
+        self.root.after(200, self.ensure_fullscreen)
         
-        # Mostrar instruções na tela por alguns segundos
+        # 8. Manter sempre no topo (menos agressivo)
+        self.root.after(1000, self.keep_focus)
+        
+        # 9. Mostrar instruções brevemente
         self.root.after(500, self.show_instructions)
         
         # Iniciar animação
@@ -169,40 +165,31 @@ class ScreensaverIFPB:
         self.display_message(instructions, duration=5000, color='cyan', font_size=32)
     
     def ensure_fullscreen(self):
-        """Garante que a janela está em tela cheia (útil para Armbian)"""
+        """Garante que a janela está maximizada (simplificado para Armbian)"""
         try:
-            screen_width = self.root.winfo_screenwidth()
-            screen_height = self.root.winfo_screenheight()
-            
-            # Verificar se a janela está realmente em tela cheia
-            current_width = self.root.winfo_width()
-            current_height = self.root.winfo_height()
-            
-            # Se não estiver em tela cheia, forçar novamente
-            if current_width < screen_width or current_height < screen_height:
-                self.root.geometry(f"{screen_width}x{screen_height}+0+0")
-                self.root.attributes('-fullscreen', True)
-                self.root.update_idletasks()
+            # Apenas garantir que está maximizada (não fullscreen para não travar)
+            try:
+                self.root.state('zoomed')
+            except:
+                pass
+            try:
+                self.root.attributes('-zoomed', True)
+            except:
+                pass
         except Exception as e:
             print(f"Aviso ao verificar tela cheia: {e}")
     
     def keep_focus(self):
-        """Mantém o foco na janela (útil para Armbian onde o foco pode ser perdido)"""
+        """Mantém o foco na janela (simplificado)"""
         try:
-            # Verificar se a janela ainda existe
             if self.root and self.root.winfo_exists():
-                # Forçar foco periodicamente
-                self.root.focus_set()
-                self.canvas.focus_set()
-                self.root.focus_force()
-                
-                # Verificar se tem foco (debug)
-                has_focus = self.root.focus_get() == self.root or self.canvas.focus_get() == self.canvas
-                if not has_focus:
-                    print("Aviso: Janela perdeu o foco, tentando recuperar...")
-                
-                # Agendar próxima verificação (a cada 1 segundo - mais frequente)
-                self.root.after(1000, self.keep_focus)
+                # Apenas manter sempre no topo (não forçar foco agressivamente)
+                try:
+                    self.root.attributes('-topmost', True)
+                except:
+                    pass
+                # Verificar menos frequentemente (a cada 3 segundos)
+                self.root.after(3000, self.keep_focus)
         except Exception as e:
             print(f"Erro em keep_focus: {e}")
     
@@ -325,45 +312,28 @@ class ScreensaverIFPB:
         self.root = tk.Tk()
         self.root.title("Proteção de Tela IFPB")
         
-        # Obter dimensões da tela antes de configurar
+        # Obter dimensões da tela
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
-        # Configurar fundo preto primeiro
+        # Configurar fundo preto
         self.root.configure(bg='black')
         
-        # Configurar geometria para tela cheia PRIMEIRO (antes de overrideredirect)
+        # Configurar para tela cheia (sem overrideredirect para aparecer na barra de tarefas)
         self.root.geometry(f"{screen_width}x{screen_height}+0+0")
         
-        # Remover bordas e barra de título (depois de configurar geometria)
-        self.root.overrideredirect(True)
-        
-        # Forçar tela cheia usando múltiplos métodos (compatibilidade Armbian)
+        # Maximizar janela (mais simples e compatível)
+        self.root.state('zoomed')  # Windows
         try:
-            self.root.attributes('-fullscreen', True)
+            self.root.attributes('-zoomed', True)  # Linux/Armbian
         except:
             pass
         
-        try:
-            # Método alternativo para Linux/Armbian
-            self.root.wm_attributes('-fullscreen', True)
-        except:
-            pass
-        
-        # Sempre no topo
+        # Sempre no topo (mas não bloqueia outras janelas)
         try:
             self.root.attributes('-topmost', True)
         except:
             pass
-        
-        try:
-            self.root.wm_attributes('-topmost', True)
-        except:
-            pass
-        
-        # Forçar atualização da janela
-        self.root.update_idletasks()
-        self.root.update()
         
         # Canvas para desenhar
         self.canvas = tk.Canvas(
@@ -377,30 +347,19 @@ class ScreensaverIFPB:
         # Forçar canvas a ocupar toda a tela
         self.canvas.config(width=screen_width, height=screen_height)
         
-        # Configurar canvas para receber eventos de teclado
-        # IMPORTANTE: Canvas precisa estar configurado para receber eventos
+        # Configurar canvas para receber eventos
         self.canvas.configure(takefocus=True)
-        self.canvas.focus_set()
         
         # Posição inicial do logo (centro)
         self.logo_x = (screen_width - self.logo_width) // 2
         self.logo_y = (screen_height - self.logo_height) // 2
         
-        # Forçar atualização final
-        self.root.update_idletasks()
-        self.root.update()
-        
-        # Configurar janela para receber eventos de teclado e mouse
+        # Configurar janela para receber eventos
         self.root.configure(takefocus=True)
         
-        # Forçar foco na janela e canvas (importante para Armbian)
-        # Fazer após um pequeno delay para garantir que a janela está totalmente renderizada
-        self.root.after(100, lambda: self.root.focus_force())
-        self.root.after(100, lambda: self.canvas.focus_set())
-        
-        # Garantir que eventos de mouse funcionem
+        # Focar no canvas quando clicar ou mover mouse
         self.canvas.bind('<Button-1>', lambda e: self.canvas.focus_set())
-        self.canvas.bind('<Motion>', lambda e: self.canvas.focus_set())
+        self.canvas.bind('<Enter>', lambda e: self.canvas.focus_set())
     
     def draw_logo(self):
         """Desenha o logo na tela"""
