@@ -14,18 +14,24 @@ Proteção de tela inteligente com alarmes sonoros e integração MQTT, otimizad
 
 - Python 3.6 ou superior
 - Tkinter (geralmente incluído no Python)
+- mpg123 (player de áudio - instale com: `sudo apt-get install mpg123`)
 - Bibliotecas Python (ver requirements.txt)
 
 ## Instalação
 
-1. Instale as dependências:
+1. Instale o mpg123 (player de áudio):
+```bash
+sudo apt-get install mpg123
+```
+
+2. Instale as dependências Python:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Coloque o logo do IFPB como `ifpb.png` na pasta do projeto (opcional - será criado um placeholder se não existir)
+3. Coloque o logo do IFPB como `ifpb.png` na pasta do projeto (opcional - será criado um placeholder se não existir)
 
-3. Coloque arquivos MP3 na pasta `mp3/` (a pasta será criada automaticamente se não existir)
+4. Coloque arquivos MP3 na pasta `mp3/` (a pasta será criada automaticamente se não existir)
 
 ## Uso
 
@@ -104,7 +110,7 @@ Quando uma mensagem é recebida, ela é exibida na tela por 5 segundos, sem inte
 **Problema**: MP3 não toca
 - Verifique se há arquivos `.mp3` na pasta `mp3/`
 - Verifique se o sistema tem suporte a áudio
-- Verifique se a biblioteca `pygame` está instalada corretamente
+- Verifique se o `mpg123` está instalado: `which mpg123` ou `mpg123 --version`
 
 **Problema**: Logo não aparece
 - Coloque o arquivo `ifpb.png` na pasta do projeto

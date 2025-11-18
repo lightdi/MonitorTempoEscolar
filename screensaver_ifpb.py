@@ -13,9 +13,9 @@ import os
 import random
 import threading
 import time
+import subprocess
 from datetime import datetime
 from pathlib import Path
-import pygame
 try:
     import paho.mqtt.client as mqtt
     MQTT_AVAILABLE = True
@@ -27,9 +27,11 @@ except ImportError:
 DB_NAME = "config.db"
 MP3_FOLDER = "mp3"
 LOGO_FILE = "ifpb.png"
-MQTT_BROKER = "localhost"  # Ajuste conforme necessário
+MQTT_BROKER = "200.129.71.149"  # Ajuste conforme necessário
 MQTT_PORT = 1883
 MQTT_TOPIC = "ifpb/sala01/mensagens"
+MQTT_USERNAME = "iot"
+MQTT_PASSWORD = "123"
 ALARM_DURATION = 30  # segundos
 
 class ScreensaverIFPB:
@@ -55,9 +57,7 @@ class ScreensaverIFPB:
         self.message_text_id = None
         self.logo_visible = True  # Controla se o logo está visível
         self.animation_paused = False  # Controla se a animação está pausada
-        
-        # Inicializar pygame mixer
-        pygame.mixer.init()
+        self.mpg123_process = None  # Processo do mpg123 em execução
         
         # Criar estrutura de pastas
         self.setup_folders()
@@ -257,6 +257,19 @@ class ScreensaverIFPB:
         # Agendar próxima verificação em 1 minuto
         self.root.after(60000, self.check_alarms)
     
+    def stop_mp3(self):
+        """Para a reprodução do MP3"""
+        if self.mpg123_process:
+            try:
+                self.mpg123_process.terminate()
+                self.mpg123_process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.mpg123_process.kill()
+            except Exception as e:
+                print(f"Erro ao parar MP3: {e}")
+            finally:
+                self.mpg123_process = None
+    
     def play_random_mp3(self):
         """Toca um arquivo MP3 aleatório por 30 segundos e exibe mensagem de mudança de aula"""
         mp3_files = list(Path(MP3_FOLDER).glob("*.mp3"))
@@ -272,18 +285,27 @@ class ScreensaverIFPB:
             print("Nenhum arquivo MP3 encontrado na pasta mp3/")
             return
         
+        # Parar qualquer reprodução anterior
+        self.stop_mp3()
+        
         # Escolher arquivo aleatório
         selected_file = random.choice(mp3_files)
         
         try:
-            # Carregar e tocar
-            pygame.mixer.music.load(str(selected_file))
-            pygame.mixer.music.play()
+            # Tocar usando mpg123
+            # -q = quiet mode (sem output)
+            self.mpg123_process = subprocess.Popen(
+                ['mpg123', '-q', str(selected_file)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             
             # Parar após 30 segundos
-            self.root.after(ALARM_DURATION * 1000, pygame.mixer.music.stop)
+            self.root.after(ALARM_DURATION * 1000, self.stop_mp3)
             
             print(f"Tocando: {selected_file.name} por {ALARM_DURATION} segundos")
+        except FileNotFoundError:
+            print("Erro: mpg123 não encontrado. Instale com: sudo apt-get install mpg123")
         except Exception as e:
             print(f"Erro ao tocar MP3: {e}")
     
@@ -461,6 +483,9 @@ class ScreensaverIFPB:
             self.mqtt_client.on_message = self.on_mqtt_message
             self.mqtt_client.on_disconnect = self.on_mqtt_disconnect
             
+            # Configurar autenticação
+            self.mqtt_client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+            
             try:
                 self.mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
                 self.mqtt_client.loop_start()
@@ -537,7 +562,8 @@ class ScreensaverIFPB:
             if self.mqtt_client:
                 self.mqtt_client.loop_stop()
                 self.mqtt_client.disconnect()
-            pygame.mixer.quit()
+            # Parar qualquer reprodução de MP3
+            self.stop_mp3()
             self.root.quit()
     
     def run(self):
