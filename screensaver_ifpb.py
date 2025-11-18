@@ -81,26 +81,53 @@ class ScreensaverIFPB:
         if MQTT_AVAILABLE:
             self.init_mqtt()
         
-        # Bind de teclas - usar bind_all para capturar eventos globais (importante para Armbian)
-        # Bind na janela principal
+        # Handler genérico para capturar qualquer tecla (mais robusto para Armbian)
+        def on_any_key(event):
+            """Captura qualquer tecla pressionada"""
+            key = event.keysym
+            keycode = event.keycode
+            char = event.char if hasattr(event, 'char') else ''
+            
+            # Debug: imprimir tecla pressionada (descomente para debug)
+            print(f"Tecla pressionada: keysym='{key}' keycode={keycode} char='{char}'")
+            
+            # Verificar F2 (pode vir como F2, F2_L, ou keycode 68, ou 113 em alguns sistemas)
+            if key == 'F2' or keycode == 68 or keycode == 113:
+                print("F2 detectado - abrindo configuração")
+                self.show_config_window(event)
+            # Verificar ESC (pode vir como Escape, Escape_L, ou keycode 9, ou 27)
+            elif key == 'Escape' or keycode == 9 or keycode == 27:
+                print("ESC detectado - fechando programa")
+                self.on_escape(event)
+        
+        # Bind de teclas - múltiplas abordagens para máxima compatibilidade
+        # 1. Handler genérico que captura qualquer tecla
+        self.root.bind('<Key>', on_any_key)
+        self.root.bind('<KeyPress>', on_any_key)
+        self.canvas.bind('<Key>', on_any_key)
+        self.canvas.bind('<KeyPress>', on_any_key)
+        
+        # 2. Binds específicos (backup)
         self.root.bind('<F2>', self.show_config_window)
         self.root.bind('<Escape>', self.on_escape)
         self.root.bind('<KeyPress-F2>', self.show_config_window)
         self.root.bind('<KeyPress-Escape>', self.on_escape)
         
-        # Bind no canvas também
+        # 3. Binds no canvas
         self.canvas.bind('<F2>', self.show_config_window)
         self.canvas.bind('<Escape>', self.on_escape)
         self.canvas.bind('<KeyPress-F2>', self.show_config_window)
         self.canvas.bind('<KeyPress-Escape>', self.on_escape)
         
-        # Bind global (captura eventos mesmo sem foco - útil para Armbian)
+        # 4. Bind global (captura eventos mesmo sem foco)
+        self.root.bind_all('<Key>', on_any_key)
+        self.root.bind_all('<KeyPress>', on_any_key)
         self.root.bind_all('<F2>', self.show_config_window)
         self.root.bind_all('<Escape>', self.on_escape)
         self.root.bind_all('<KeyPress-F2>', self.show_config_window)
         self.root.bind_all('<KeyPress-Escape>', self.on_escape)
         
-        # Garantir que a janela receba foco periodicamente (para Armbian)
+        # 5. Garantir que a janela receba foco periodicamente (para Armbian)
         self.root.after(500, self.keep_focus)
         
         # Forçar tela cheia novamente após tudo estar carregado (garantia para Armbian)
@@ -135,10 +162,17 @@ class ScreensaverIFPB:
                 # Forçar foco periodicamente
                 self.root.focus_set()
                 self.canvas.focus_set()
-                # Agendar próxima verificação (a cada 2 segundos)
-                self.root.after(2000, self.keep_focus)
-        except:
-            pass
+                self.root.focus_force()
+                
+                # Verificar se tem foco (debug)
+                has_focus = self.root.focus_get() == self.root or self.canvas.focus_get() == self.canvas
+                if not has_focus:
+                    print("Aviso: Janela perdeu o foco, tentando recuperar...")
+                
+                # Agendar próxima verificação (a cada 1 segundo - mais frequente)
+                self.root.after(1000, self.keep_focus)
+        except Exception as e:
+            print(f"Erro em keep_focus: {e}")
     
     def setup_folders(self):
         """Cria as pastas necessárias se não existirem"""
@@ -232,6 +266,8 @@ class ScreensaverIFPB:
         self.canvas.config(width=screen_width, height=screen_height)
         
         # Configurar canvas para receber eventos de teclado
+        # IMPORTANTE: Canvas precisa estar configurado para receber eventos
+        self.canvas.configure(takefocus=True)
         self.canvas.focus_set()
         
         # Posição inicial do logo (centro)
@@ -246,6 +282,9 @@ class ScreensaverIFPB:
         self.root.focus_set()
         self.canvas.focus_set()
         self.root.focus_force()
+        
+        # Configurar janela para receber eventos de teclado
+        self.root.configure(takefocus=True)
     
     def draw_logo(self):
         """Desenha o logo na tela"""
