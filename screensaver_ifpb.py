@@ -29,7 +29,7 @@ MP3_FOLDER = "mp3"
 LOGO_FILE = "ifpb.png"
 MQTT_BROKER = "localhost"  # Ajuste conforme necessário
 MQTT_PORT = 1883
-MQTT_TOPIC = "ifpb/sala101/mensagens"
+MQTT_TOPIC = "ifpb/sala01/mensagens"
 ALARM_DURATION = 30  # segundos
 
 class ScreensaverIFPB:
@@ -37,7 +37,7 @@ class ScreensaverIFPB:
         self.root = None
         self.canvas = None
         self.logo_image = None
-        self.logo_id = None
+        self.logo_ids = []  # Lista de IDs dos elementos do logo
         self.logo_x = 0
         self.logo_y = 0
         self.logo_dx = 2  # velocidade horizontal
@@ -53,6 +53,8 @@ class ScreensaverIFPB:
         self.mqtt_connected = False
         self.message_display_id = None
         self.message_text_id = None
+        self.logo_visible = True  # Controla se o logo está visível
+        self.animation_paused = False  # Controla se a animação está pausada
         
         # Inicializar pygame mixer
         pygame.mixer.init()
@@ -63,11 +65,14 @@ class ScreensaverIFPB:
         # Inicializar banco de dados
         self.init_database()
         
-        # Carregar logo
+        # Inicializar interface principal (deve ser antes de carregar logo)
+        self.init_main_window()
+        
+        # Carregar logo (após criar a janela root)
         self.load_logo()
         
-        # Inicializar interface principal
-        self.init_main_window()
+        # Desenhar logo inicial (após carregar)
+        self.draw_logo()
         
         # Iniciar verificação de alarmes
         self.check_alarms()
@@ -106,7 +111,7 @@ class ScreensaverIFPB:
             try:
                 from PIL import Image, ImageTk
                 img = Image.open(LOGO_FILE)
-                img = img.resize((self.logo_width, self.logo_height), Image.Resampling.LANCZOS)
+                img = img.resize((self.logo_width + 100, self.logo_height + 100), Image.Resampling.LANCZOS)
                 self.logo_image = ImageTk.PhotoImage(img)
             except ImportError:
                 # Se PIL não estiver disponível, usar imagem simples
@@ -142,24 +147,24 @@ class ScreensaverIFPB:
         screen_height = self.root.winfo_screenheight()
         self.logo_x = (screen_width - self.logo_width) // 2
         self.logo_y = (screen_height - self.logo_height) // 2
-        
-        # Desenhar logo inicial
-        self.draw_logo()
     
     def draw_logo(self):
         """Desenha o logo na tela"""
-        if self.logo_id:
-            self.canvas.delete(self.logo_id)
+        # Deletar todos os elementos anteriores do logo
+        for logo_id in self.logo_ids:
+            self.canvas.delete(logo_id)
+        self.logo_ids.clear()
         
         if self.logo_image:
-            self.logo_id = self.canvas.create_image(
+            logo_id = self.canvas.create_image(
                 self.logo_x + self.logo_width // 2,
                 self.logo_y + self.logo_height // 2,
                 image=self.logo_image
             )
+            self.logo_ids.append(logo_id)
         else:
             # Placeholder: retângulo com texto IFPB
-            self.logo_id = self.canvas.create_rectangle(
+            rect_id = self.canvas.create_rectangle(
                 self.logo_x,
                 self.logo_y,
                 self.logo_x + self.logo_width,
@@ -168,16 +173,23 @@ class ScreensaverIFPB:
                 outline='white',
                 width=3
             )
-            self.canvas.create_text(
+            text_id = self.canvas.create_text(
                 self.logo_x + self.logo_width // 2,
                 self.logo_y + self.logo_height // 2,
                 text="IFPB",
                 font=('Arial', 48, 'bold'),
                 fill='white'
             )
+            self.logo_ids.append(rect_id)
+            self.logo_ids.append(text_id)
     
     def animate_logo(self):
         """Anima o logo pela tela (usando after() para eficiência)"""
+        # Não animar se o logo estiver oculto
+        if not self.logo_visible:
+            self.root.after(30, self.animate_logo)
+            return
+        
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         
@@ -199,6 +211,22 @@ class ScreensaverIFPB:
         
         # Agendar próxima animação (30ms = ~33 FPS, leve para Armbian)
         self.root.after(30, self.animate_logo)
+    
+    def hide_logo(self):
+        """Oculta o logo da tela"""
+        if self.logo_visible:
+            self.logo_visible = False
+            # Deletar todos os elementos do logo
+            for logo_id in self.logo_ids:
+                self.canvas.delete(logo_id)
+            self.logo_ids.clear()
+    
+    def show_logo(self):
+        """Mostra o logo na tela novamente"""
+        if not self.logo_visible:
+            self.logo_visible = True
+            # Redesenhar o logo
+            self.draw_logo()
     
     def get_horarios(self):
         """Retorna lista de horários do banco"""
@@ -230,8 +258,15 @@ class ScreensaverIFPB:
         self.root.after(60000, self.check_alarms)
     
     def play_random_mp3(self):
-        """Toca um arquivo MP3 aleatório por 30 segundos"""
+        """Toca um arquivo MP3 aleatório por 30 segundos e exibe mensagem de mudança de aula"""
         mp3_files = list(Path(MP3_FOLDER).glob("*.mp3"))
+        
+        # Exibir mensagem de mudança de aula na tela
+        now = datetime.now()
+        hora_atual = now.strftime("%H:%M")
+        mensagem = f"MUDANÇA DE AULA!\n\nHorário: {hora_atual}"
+        # Exibir por 10 segundos (mais tempo que mensagens MQTT) com cor vermelha e fonte maior
+        self.display_message(mensagem, duration=10000, color='red', font_size=64)
         
         if not mp3_files:
             print("Nenhum arquivo MP3 encontrado na pasta mp3/")
@@ -284,14 +319,27 @@ class ScreensaverIFPB:
         hora_entry = ttk.Entry(add_frame, width=10, font=('Arial', 12))
         hora_entry.pack(pady=5)
         
+        # Label de status (feedback visual)
+        status_label = ttk.Label(add_frame, text="", foreground="green", font=('Arial', 9))
+        status_label.pack(pady=2)
+        
         def add_horario():
             hora = hora_entry.get().strip()
             if self.validate_hora(hora):
-                self.insert_horario(hora)
-                hora_entry.delete(0, tk.END)
-                refresh_list()
+                if self.insert_horario(hora):
+                    hora_entry.delete(0, tk.END)
+                    hora_entry.focus_set()  # Volta o foco para o campo
+                    refresh_list()
+                    # Mostrar feedback visual de sucesso
+                    status_label.config(text=f"✓ Horário {hora} adicionado!", foreground="green")
+                    # Limpar mensagem após 2 segundos
+                    self.config_window.after(2000, lambda: status_label.config(text=""))
+                else:
+                    status_label.config(text="", foreground="red")
             else:
                 messagebox.showerror("Erro", "Formato inválido! Use HH:MM (ex: 08:30)")
+                hora_entry.focus_set()
+                status_label.config(text="", foreground="red")
         
         ttk.Button(add_frame, text="Adicionar", command=add_horario).pack(pady=5)
         
@@ -315,16 +363,38 @@ class ScreensaverIFPB:
         delete_frame = ttk.Frame(main_frame)
         delete_frame.pack(fill=tk.X, pady=10)
         
+        # Label de status para exclusão
+        delete_status_label = ttk.Label(delete_frame, text="", foreground="red", font=('Arial', 9))
+        delete_status_label.pack(side=tk.LEFT, padx=5)
+        
         def delete_selected():
             selection = self.horarios_listbox.curselection()
             if selection:
                 hora = self.horarios_listbox.get(selection[0])
-                self.delete_horario(hora)
-                refresh_list()
+                if self.delete_horario(hora):
+                    refresh_list()
+                    # Mostrar feedback visual de sucesso
+                    delete_status_label.config(text=f"✓ Horário {hora} removido!", foreground="red")
+                    # Limpar mensagem após 2 segundos
+                    self.config_window.after(2000, lambda: delete_status_label.config(text=""))
             else:
-                messagebox.showwarning("Aviso", "Selecione um horário para excluir")
+                delete_status_label.config(text="Selecione um horário para excluir", foreground="orange")
+                self.config_window.after(2000, lambda: delete_status_label.config(text=""))
         
         ttk.Button(delete_frame, text="Excluir Selecionado", command=delete_selected).pack(side=tk.LEFT, padx=5)
+        
+        # Adicionar atalho: duplo clique para excluir
+        def on_double_click(event):
+            # Selecionar o item clicado
+            widget = event.widget
+            index = widget.nearest(event.y)
+            if index >= 0:
+                widget.selection_clear(0, tk.END)
+                widget.selection_set(index)
+                widget.activate(index)
+                delete_selected()
+        
+        self.horarios_listbox.bind('<Double-Button-1>', on_double_click)
         
         def close_config():
             self.config_window.destroy()
@@ -353,7 +423,7 @@ class ScreensaverIFPB:
             return False
     
     def insert_horario(self, hora):
-        """Insere horário no banco"""
+        """Insere horário no banco. Retorna True se inserido com sucesso, False caso contrário"""
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         
@@ -361,21 +431,24 @@ class ScreensaverIFPB:
         cursor.execute("SELECT id FROM horarios WHERE hora = ?", (hora,))
         if cursor.fetchone():
             messagebox.showwarning("Aviso", "Este horário já está cadastrado!")
+            conn.close()
+            return False
         else:
             cursor.execute("INSERT INTO horarios (hora) VALUES (?)", (hora,))
             conn.commit()
-            messagebox.showinfo("Sucesso", f"Horário {hora} adicionado!")
-        
-        conn.close()
+            conn.close()
+            # Mensagem mais discreta ou sem messagebox para não interromper o fluxo
+            # messagebox.showinfo("Sucesso", f"Horário {hora} adicionado!")
+            return True
     
     def delete_horario(self, hora):
-        """Remove horário do banco"""
+        """Remove horário do banco. Retorna True se removido com sucesso"""
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM horarios WHERE hora = ?", (hora,))
         conn.commit()
         conn.close()
-        messagebox.showinfo("Sucesso", f"Horário {hora} removido!")
+        return True
     
     def init_mqtt(self):
         """Inicializa cliente MQTT em thread separada"""
@@ -420,13 +493,16 @@ class ScreensaverIFPB:
         self.mqtt_connected = False
         print("Desconectado do MQTT broker")
     
-    def display_message(self, message):
-        """Exibe mensagem MQTT na tela por alguns segundos"""
+    def display_message(self, message, duration=5000, color='yellow', font_size=48):
+        """Exibe mensagem na tela por alguns segundos"""
         # Remover mensagem anterior se existir
         if self.message_text_id:
             self.canvas.delete(self.message_text_id)
         if self.message_display_id:
             self.root.after_cancel(self.message_display_id)
+        
+        # Ocultar logo quando mensagem aparecer
+        self.hide_logo()
         
         # Criar texto grande e centralizado
         screen_width = self.root.winfo_screenwidth()
@@ -436,21 +512,24 @@ class ScreensaverIFPB:
             screen_width // 2,
             screen_height // 2,
             text=message,
-            font=('Arial', 48, 'bold'),
-            fill='yellow',
+            font=('Arial', font_size, 'bold'),
+            fill=color,
             justify=tk.CENTER,
             width=screen_width - 100
         )
         
-        # Remover após 5 segundos
-        self.message_display_id = self.root.after(5000, self.clear_message)
+        # Remover após o tempo especificado
+        self.message_display_id = self.root.after(duration, self.clear_message)
     
     def clear_message(self):
-        """Remove a mensagem da tela"""
+        """Remove a mensagem da tela e mostra o logo novamente"""
         if self.message_text_id:
             self.canvas.delete(self.message_text_id)
             self.message_text_id = None
         self.message_display_id = None
+        
+        # Mostrar logo novamente quando mensagem desaparecer
+        self.show_logo()
     
     def on_escape(self, event=None):
         """Fecha o programa ao pressionar Escape"""
